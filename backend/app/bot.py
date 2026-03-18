@@ -1,5 +1,7 @@
 import asyncio
 import os
+from typing import Any
+
 import httpx
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -7,35 +9,108 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_URL = os.getenv("API_URL")
+API_URL = os.getenv("API_URL", "http://localhost:8000")
+WEBAPP_URL = os.getenv("WEBAPP_URL", API_URL)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+RUN_TELEGRAM_BOT = os.getenv("RUN_TELEGRAM_BOT", "false").lower() in {"1", "true", "yes", "on"}
 
-bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+
+def build_user_headers(message: types.Message) -> dict[str, str]:
+    user = message.from_user
+    if not user:
+        return {}
+    headers = {"X-Telegram-Id": str(user.id)}
+    if user.username:
+        headers["X-Telegram-Username"] = user.username
+    if user.first_name:
+        headers["X-Telegram-First-Name"] = user.first_name
+    if user.last_name:
+        headers["X-Telegram-Last-Name"] = user.last_name
+    return headers
+
+
+def bot_runtime_config() -> dict[str, Any]:
+    return {
+        "bot_enabled": RUN_TELEGRAM_BOT,
+        "telegram_token_configured": bool(TELEGRAM_TOKEN),
+        "api_url": API_URL,
+        "webapp_url": WEBAPP_URL,
+    }
 
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    await message.answer("Yakamy бот готов 🚀\nПиши задачу текстом")
+    await message.answer(
+        "Yakamy бот готов 🚀\n"
+        "Твои данные теперь привязываются к Telegram-аккаунту.\n"
+        f"Открой сайт и зайди через Telegram: {WEBAPP_URL}\n\n"
+        "Пример: 'создай задачу допилить web страницу, высокий приоритет'"
+    )
+
+
+@dp.message(Command("help"))
+async def help_handler(message: types.Message):
+    await message.answer(
+        "Команды:\n"
+        "/start — запуск\n"
+        "/help — помощь\n\n"
+        "Любое сообщение уйдёт в backend /ai/handle от имени твоего Telegram-аккаунта."
+    )
 
 
 @dp.message()
 async def handle_message(message: types.Message):
-    text = message.text
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Пришли текстовое сообщение, чтобы я передал его агенту.")
+        return
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{API_URL}/ai/handle",
-            json={"text": text}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{API_URL}/ai/handle",
+                json={"text": text},
+                headers=build_user_headers(message),
+            )
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError as error:
+        await message.answer(f"Backend недоступен: {error}")
+        return
+
+    reply = data.get("reply", "Готово")
+    tool_results = data.get("tool_results", [])
+    dashboard = data.get("dashboard", {}).get("counts", {})
+
+    lines = [f"🤖 {reply}"]
+    if tool_results:
+        lines.append("\nИнструменты:")
+        for item in tool_results:
+            lines.append(f"- {item['tool']}")
+    if dashboard:
+        lines.append(
+            f"\nТвой аккаунт: задач {dashboard.get('tasks', 0)}, заметок {dashboard.get('notes', 0)}, напоминаний {dashboard.get('reminders', 0)}"
         )
+    lines.append(f"\nWeb: {WEBAPP_URL}")
 
-    data = response.json()
-
-    await message.answer(f"Создано:\n{data}")
+    await message.answer("\n".join(lines))
 
 
-async def main():
-    await dp.start_polling(bot)
+async def start_bot_polling() -> None:
+    if not TELEGRAM_TOKEN:
+        raise RuntimeError("TELEGRAM_TOKEN is not configured")
+
+    bot = Bot(token=TELEGRAM_TOKEN)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+
+
+async def main() -> None:
+    await start_bot_polling()
 
 
 if __name__ == "__main__":

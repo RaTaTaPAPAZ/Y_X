@@ -1,3 +1,0 @@
-notes = []
-tasks = []
-reminders = []

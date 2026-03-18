@@ -1,18 +1,22 @@
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class TaskCreate(BaseModel):
-    title: str
+    title: str = Field(min_length=1)
     description: str | None = None
-    priority: str = "normal"
-    widgets: list = []
+    status: str = "todo"
+    priority: str = "medium"
+    source: str = "manual"
+    widgets: list[dict[str, Any]] = Field(default_factory=list)
 
-class TaskResponse(BaseModel):
+
+class TaskResponse(TaskCreate):
     id: int
-    title: str
-    description: str | None
-    status: str
-    priority: str
+    user_id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True
