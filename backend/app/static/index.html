@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yakamy Control Panel</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --line: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --good: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: linear-gradient(180deg, #020617, var(--bg));
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1, h2, h3 { margin-top: 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: rgba(30, 41, 59, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(2, 6, 23, 0.35);
+    }
+    .count {
+      font-size: 32px;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+    form, .stack { display: grid; gap: 10px; }
+    input, textarea, select, button {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      font-size: 14px;
+      color: var(--text);
+      background: #0f172a;
+    }
+    textarea { min-height: 110px; resize: vertical; }
+    button {
+      background: linear-gradient(90deg, #0ea5e9, var(--accent));
+      color: #082f49;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+    }
+    .list { display: grid; gap: 10px; }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(15, 23, 42, 0.9);
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      margin-right: 6px;
+      font-size: 12px;
+    }
+    .success { color: var(--good); }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #020617;
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" style="margin-bottom: 16px;">
+      <h1>Yakamy — Telegram + LLM MCP Agent</h1>
+      <p>Панель для задач, заметок, напоминаний и общения с OpenClaw/OpenAI-compatible агентом.</p>
+    </div>
+
+    <section class="grid" id="stats"></section>
+
+    <section class="grid" style="margin-top: 16px; align-items: start;">
+      <div class="card">
+        <h2>Чат с агентом</h2>
+        <form id="agent-form" class="stack">
+          <textarea id="agent-text" placeholder="Например: создай задачу подготовить web страницу с высоким приоритетом"></textarea>
+          <button type="submit">Отправить в агента</button>
+        </form>
+        <p id="agent-status" class="success"></p>
+        <pre id="agent-result">Здесь появится ответ агента…</pre>
+      </div>
+
+      <div class="card">
+        <h2>Быстрое создание</h2>
+        <form id="task-form" class="stack">
+          <h3>Задача</h3>
+          <input id="task-title" placeholder="Название задачи" required />
+          <textarea id="task-description" placeholder="Описание"></textarea>
+          <select id="task-priority">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+          </select>
+          <button type="submit">Создать задачу</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top: 16px; align-items: start;">
+      <div class="card">
+        <h2>Последние задачи</h2>
+        <div id="tasks" class="list"></div>
+      </div>
+      <div class="card">
+        <h2>Последние заметки</h2>
+        <div id="notes" class="list"></div>
+      </div>
+      <div class="card">
+        <h2>Напоминания</h2>
+        <div id="reminders" class="list"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      return response.json();
+    }
+
+    function renderItems(targetId, items, type) {
+      const target = document.getElementById(targetId);
+      target.innerHTML = '';
+      if (!items.length) {
+        target.innerHTML = '<div class="item">Пока пусто</div>';
+        return;
+      }
+      items.forEach(item => {
+        const el = document.createElement('div');
+        el.className = 'item';
+        const extra = type === 'tasks'
+          ? `<span class="pill">${item.priority}</span><span class="pill">${item.status}</span>`
+          : type === 'reminders'
+            ? `<span class="pill">${new Date(item.remind_at).toLocaleString('ru-RU')}</span>`
+            : `<span class="pill">${item.source}</span>`;
+        el.innerHTML = `<strong>${item.title}</strong><div>${item.description || ''}</div><div class="meta">${extra}</div>`;
+        target.appendChild(el);
+      });
+    }
+
+    function renderStats(dashboard) {
+      const stats = document.getElementById('stats');
+      const counts = dashboard.counts;
+      stats.innerHTML = `
+        <div class="card"><div>Задачи</div><div class="count">${counts.tasks}</div></div>
+        <div class="card"><div>Заметки</div><div class="count">${counts.notes}</div></div>
+        <div class="card"><div>Напоминания</div><div class="count">${counts.reminders}</div></div>
+      `;
+      renderItems('tasks', dashboard.recent_tasks, 'tasks');
+      renderItems('notes', dashboard.recent_notes, 'notes');
+      renderItems('reminders', dashboard.upcoming_reminders, 'reminders');
+    }
+
+    async function refreshDashboard() {
+      const dashboard = await api('/ai/dashboard');
+      renderStats(dashboard);
+    }
+
+    document.getElementById('agent-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = document.getElementById('agent-text').value.trim();
+      if (!text) return;
+      document.getElementById('agent-status').textContent = 'Агент думает…';
+      try {
+        const result = await api('/ai/handle', {
+          method: 'POST',
+          body: JSON.stringify({ text }),
+        });
+        document.getElementById('agent-result').textContent = JSON.stringify(result, null, 2);
+        document.getElementById('agent-status').textContent = 'Готово';
+        await refreshDashboard();
+      } catch (error) {
+        document.getElementById('agent-status').textContent = `Ошибка: ${error.message}`;
+      }
+    });
+
+    document.getElementById('task-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        title: document.getElementById('task-title').value,
+        description: document.getElementById('task-description').value,
+        priority: document.getElementById('task-priority').value,
+        source: 'web',
+      };
+      await api('/tasks/', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      event.target.reset();
+      await refreshDashboard();
+    });
+
+    refreshDashboard();
+  </script>
+</body>
+</html>
