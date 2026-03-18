@@ -13,6 +13,7 @@ class NoteCreate(BaseModel):
 
 class NoteResponse(NoteCreate):
     id: int
+    user_id: int
     created_at: datetime
 
     class Config:

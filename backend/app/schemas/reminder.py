@@ -13,6 +13,7 @@ class ReminderCreate(BaseModel):
 
 class ReminderResponse(ReminderCreate):
     id: int
+    user_id: int
     created_at: datetime
 
     class Config:

@@ -15,6 +15,7 @@ class TaskCreate(BaseModel):
 
 class TaskResponse(TaskCreate):
     id: int
+    user_id: int
     created_at: datetime
 
     class Config:
